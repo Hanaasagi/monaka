@@ -4,6 +4,7 @@ import stat
 import sys
 import qrcode
 import socket
+import re
 import fcntl
 import struct
 import webbrowser
@@ -23,11 +24,26 @@ class DownloadHandler(tornado.web.RequestHandler):
     def get(self):
         file_name = file_path.split('/')[-1]
         content_length = self.get_content_size(file_path)
-        self.set_header("Content-Length", content_length)
+        start, end = 0, content_length
+        # get header Range example bytes=15728640-650043553
+        header_range = self.request.headers.get('Range', '')
+        info = re.findall('bytes=([\d]+)-([\d]*)', header_range)
+        if info:
+            start = int(info[0][0])
+            end = int(info[0][1])
+
+        if start > 0 or end < content_length:
+            self.set_status(206)
+            self.set_header('Content-Range', 'bytes {0}-{1}/{2}'.format(start, end , content_length))
+        else:
+            self.set_status(200)
+
+        # common headers
+        self.set_header("Content-Length", end - start)
         self.set_header("Content-Type", "application/octet-stream")
         self.set_header("Content-Disposition",
                         "attachment;filename=\"{0}\"".format(file_name))
-        content = self.get_content(file_path)
+        content = self.get_content(file_path, start, end)
         if isinstance(content, bytes):
             content = [content]
         for chunk in content:
@@ -38,9 +54,7 @@ class DownloadHandler(tornado.web.RequestHandler):
                 break
         return
 
-    def get_content(self, file_path):
-        start = None
-        end = None
+    def get_content(self, file_path, start=None, end=None):
         with open(file_path, "rb") as file:
             if start is not None:
                 file.seek(start)
@@ -68,7 +82,7 @@ class DownloadHandler(tornado.web.RequestHandler):
         return content_size
 
 
-class HelloHandler(tornado.web.RequestHandler):
+class DefaultHandler(tornado.web.RequestHandler):
 
     def get(self):
         self.render('index.html')
@@ -79,7 +93,7 @@ class Application(tornado.web.Application):
     def __init__(self):
         handlers = [
             (r"/download", DownloadHandler),
-            (r".*?", HelloHandler),
+            (r".*?", DefaultHandler),
         ]
         static_path = os.path.join(os.path.dirname(__file__), "static")
         tornado.web.Application.__init__(
@@ -99,6 +113,7 @@ def create_qr():
     ip = get_ip_address('eth0')
     qr = qrcode.make('http://{0}:{1}/download'.format(ip, port))
     qr.save('./static/qr.png')
+
 
 if __name__ == "__main__":
     file_path = sys.argv[1]
