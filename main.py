@@ -7,6 +7,7 @@ import socket
 import re
 import fcntl
 import struct
+import argparse
 import webbrowser
 import tornado.gen
 import tornado.httpserver
@@ -25,7 +26,6 @@ class DownloadHandler(tornado.web.RequestHandler):
         file_name = file_path.split('/')[-1]
         content_length = self.get_content_size(file_path)
         start, end = 0, content_length
-        # get header Range example bytes=15728640-650043553
         header_range = self.request.headers.get('Range', '')
         info = re.findall('bytes=([\d]+)-([\d]*)', header_range)
         if info:
@@ -34,10 +34,10 @@ class DownloadHandler(tornado.web.RequestHandler):
 
         if start > 0 or end < content_length:
             self.set_status(206)
-            self.set_header('Content-Range', 'bytes {0}-{1}/{2}'.format(start, end , content_length))
+            self.set_header(
+                'Content-Range', 'bytes {0}-{1}/{2}'.format(start, end, content_length))
         else:
             self.set_status(200)
-
         # common headers
         self.set_header("Content-Length", end - start)
         self.set_header("Content-Type", "application/octet-stream")
@@ -109,15 +109,26 @@ def get_ip_address(ifname):
     )[20:24])
 
 
-def create_qr():
-    ip = get_ip_address('eth0')
+def create_qr(ip, port):
     qr = qrcode.make('http://{0}:{1}/download'.format(ip, port))
     qr.save('./static/qr.png')
 
 
+def cmd_parser():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-p', type=str, dest='file_path', required=True,
+                        action='store', help='Specify your download path')
+    parser.add_argument('-i', type=str, dest='interface', required=True,
+                        action='store', help='interface wlan0 or eth0 ...')
+    args = parser.parse_args()
+    return args.file_path, args.interface
+
+
 if __name__ == "__main__":
-    file_path = sys.argv[1]
-    create_qr()
+    file_path, interface = cmd_parser()
+    ip = get_ip_address(interface)
+    create_qr(ip, port)
     webbrowser.open_new('http://127.0.0.1:{}'.format(port))
     application = Application()
     http_server = tornado.httpserver.HTTPServer(application, xheaders=True)
